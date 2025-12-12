@@ -1,0 +1,5 @@
+{
+  "name": "AI PPT Generator",
+  "description": "Upload documents or links, and let AI generate, format, and export a presentation deck for you.",
+  "requestFramePermissions": []
+}
