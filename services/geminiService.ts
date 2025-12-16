@@ -278,8 +278,8 @@ export const generateFinalSlideImage = async (
     3. **Text Rendering**: Render the TITLE clearly. Render the Key Points legibly if they fit; if there is too much text, summarize it visually or use distinct headers. 
     4. **Image Integration**: 
        ${imageCount > 0 ? `I have provided ${imageCount} specific images for this slide.` : "No user images provided. Generate a custom illustration/graphic based on the Visual Description."}
-       ${imageCount === 1 ? "Integrate the single provided image seamlessly (e.g., as a hero image, full background with overlay, or split layout). The provided images must be clearly displayed in the page layout." : ""}
-       ${imageCount > 1 ? "Arrange the provided images artistically (e.g., a neat grid, a collage, or distributed across the layout). Ensure they balance well with the text. The provided images must be clearly displayed in the page layout." : ""}
+       ${imageCount === 1 ? "Integrate the single provided image seamlessly (e.g., as a hero image, full background with overlay, or split layout). The provided images must be clearly displayed in the page layout. Keep the originally uploaded images unchanged; do not modify their content or colors." : ""}
+       ${imageCount > 1 ? "Arrange the provided images artistically (e.g., a neat grid, a collage, or distributed across the layout). Ensure they balance well with the text. The provided images must be clearly displayed in the page layout. Keep the originally uploaded images unchanged; do not modify their content or colors." : ""}
        IMPORTANT: If provided, the user images MUST be visible in the final design.
     
     Output: A single high-quality presentation slide image.
