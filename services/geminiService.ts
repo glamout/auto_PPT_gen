@@ -309,7 +309,7 @@ export const generateFinalSlideImage = async (
         generationConfig: {
             imageConfig: {
                 aspectRatio: "16:9",
-                imageSize: "2K"
+                imageSize: "4K"
             }
         }
     };
@@ -335,7 +335,7 @@ export const generateFinalSlideImage = async (
                 generationConfig: {
                     imageConfig: {
                         aspectRatio: "16:9",
-                        imageSize: "2K"
+                        imageSize: "4K"
                     }
                 }
              })
@@ -391,7 +391,7 @@ export const generateFinalSlideImage = async (
       config: {
         imageConfig: {
           aspectRatio: "16:9",
-          imageSize: "2K" // High quality for text legibility
+          imageSize: "4K" // High quality for text legibility
         }
       }
     });
