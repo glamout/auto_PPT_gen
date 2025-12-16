@@ -309,18 +309,28 @@ export const generateFinalSlideImage = async (
         generationConfig: {
             imageConfig: {
                 aspectRatio: "16:9",
-                imageSize: "4K"
+                imageSize: "2K"
             }
         }
     };
     
+    // Sanitize payload for logging to avoid logging large base64 images
+    const logPayload = JSON.parse(JSON.stringify(payload));
+    if (logPayload.contents?.[0]?.parts) {
+        logPayload.contents[0].parts.forEach((part: any) => {
+            if (part.inlineData?.data) {
+                part.inlineData.data = "[BASE64_IMAGE_DATA_OMITTED]";
+            }
+        });
+    }
+
     addLog?.({
       timestamp: new Date().toISOString(),
       type: 'request',
       url: '/api/zenmux/vertex-ai/v1/models/google/gemini-3-pro-image-preview:generateContent',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: { ...payload, apiKey: '***' }
+      body: { ...logPayload, apiKey: '***' }
     });
 
     try {
@@ -335,20 +345,23 @@ export const generateFinalSlideImage = async (
                 generationConfig: {
                     imageConfig: {
                         aspectRatio: "16:9",
-                        imageSize: "4K"
+                        imageSize: "2K"
                     }
                 }
              })
         });
         
         const data = await resp.json();
-        addLog?.({
-              timestamp: new Date().toISOString(),
-              type: 'response',
-              response: data
-          });
-
-        if (!resp.ok) throw new Error(data.error?.message || 'Zenmux Image API Error');
+        
+        // Only log response if it failed
+        if (!resp.ok) {
+             addLog?.({
+                  timestamp: new Date().toISOString(),
+                  type: 'response',
+                  response: data
+              });
+             throw new Error(data.error?.message || 'Zenmux Image API Error');
+        }
         
         // Handle Zenmux response format (supporting both potential formats)
         let b64 = '';
@@ -391,7 +404,7 @@ export const generateFinalSlideImage = async (
       config: {
         imageConfig: {
           aspectRatio: "16:9",
-          imageSize: "4K" // High quality for text legibility
+          imageSize: "2K" // High quality for text legibility
         }
       }
     });
