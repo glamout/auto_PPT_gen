@@ -33,11 +33,14 @@ export const translations = {
     page: "Page",
     uiLang: "Language / 语言",
     styleLabel: "Presentation Style (Optional)",
+    styleTooltip: "Describe the visual style, e.g., Characters (Anime, Realistic), Style (Minimalist, Tech, Cyberpunk, Fresh, Hand-drawn, etc.)",
     stylePlaceholder: "e.g., Minimalist, Corporate Blue, Cyberpunk, Warm & Cozy...",
     reqLabel: "Analysis & Requirements (Optional)",
+    reqTooltip: "Optional. You can also specify requirements for summarizing the uploaded content or links based on a specific theme.",
     reqPlaceholder: "e.g., Focus on financial data, use a humorous tone, strictly follow the document structure...",
     editStyle: "Visual Style Setting",
-    addImages: "Upload Images"
+    addImages: "Upload Images",
+    zenmuxInvite: "Click to register and get up to $10 free credit (10+ uses):"
   },
   zh: {
     title: "AI PPT 生成器",
@@ -72,10 +75,13 @@ export const translations = {
     page: "页",
     uiLang: "Language / 语言",
     styleLabel: "PPT 风格 (选填)",
+    styleTooltip: "可填写 PPT 设计风格，如用人物（动漫人物、或各类人物）介绍、介绍风格（极简主义、科技风、赛博朋克、小清新、手绘等等）",
     stylePlaceholder: "例如：极简主义、科技感蓝、赛博朋克、温馨手绘...",
     reqLabel: "分析及生成要求 (选填)",
+    reqTooltip: "可选填，也可针对上传的文案、或者链接要求按照主题进行提炼分析",
     reqPlaceholder: "例如：重点关注财务数据、使用幽默的语气、严格按文档结构...",
     editStyle: "视觉风格设置",
-    addImages: "上传图片"
+    addImages: "上传图片",
+    zenmuxInvite: "点击链接注册，获得免费最高$10 额度（10次以上使用额度）："
   }
 };

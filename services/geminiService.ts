@@ -1,14 +1,16 @@
 
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { PresentationPlan, Language, SlideData } from "../types";
+import { PresentationPlan, Language, SlideData, Provider, LogEntry } from "../types";
 
 // Helper function to safely get API key
-const getApiKey = () => {
+const getApiKey = (providedKey?: string) => {
+  if (providedKey) return providedKey;
   const key = process.env.API_KEY;
   if (!key) {
-    console.error("API_KEY is missing from environment variables");
-    throw new Error("API configuration error");
+    // We allow empty key here because Zenmux might be selected, 
+    // or key is provided via UI. 
+    // But if we actually need it for Google SDK and it's missing, SDK will throw.
+    return ""; 
   }
   return key;
 };
@@ -19,10 +21,12 @@ export const generateSlidePlan = async (
   urlInputs: string[],
   outputLanguage: Language,
   styleInput?: string,
-  requirementsInput?: string
+  requirementsInput?: string,
+  provider: Provider = 'google',
+  apiKey: string = '',
+  addLog?: (entry: LogEntry) => void
 ): Promise<PresentationPlan> => {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
-
+  
   let promptContext = contextText;
   
   if (urlInputs.length > 0) {
@@ -65,7 +69,111 @@ export const generateSlidePlan = async (
     (Content truncated to fit context if necessary)
   `;
 
+  // --- ZENMUX PROVIDER ---
+  if (provider === 'zenmux') {
+    // Manually construct the JSON schema description to mimic the behavior of Google's responseSchema
+    const jsonSchemaDescription = `
+    RESPONSE FORMAT INSTRUCTIONS:
+    You MUST respond with a valid JSON object strictly following this schema:
+    {
+      "type": "object",
+      "properties": {
+        "topic": { "type": "string", "description": "The main topic/title of the presentation in ${outputLanguage}" },
+        "slides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "Unique ID for the slide, e.g., 'slide-1'" },
+              "title": { "type": "string", "description": "Slide Headline in ${outputLanguage}" },
+              "bullets": { 
+                "type": "array", 
+                "items": { "type": "string" },
+                "description": "Detailed key points for the slide in ${outputLanguage}" 
+              },
+              "visualNote": { "type": "string", "description": "Detailed description of the ideal image/graphic for this slide in ${outputLanguage}" }
+            },
+            "required": ["id", "title", "bullets", "visualNote"]
+          }
+        }
+      },
+      "required": ["topic", "slides"]
+    }
+    `;
+
+    const messages = [
+      { role: 'system', content: systemInstruction + "\n\n" + jsonSchemaDescription },
+      { role: 'user', content: prompt }
+    ];
+
+    addLog?.({
+      timestamp: new Date().toISOString(),
+      type: 'request',
+      url: '/api/zenmux/v1/chat/completions',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { model: 'google/gemini-2.5-flash', messages: messages, response_format: { type: "json_object" } }
+    });
+
+    try {
+      const resp = await fetch('/api/zenmux/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      const data = await resp.json();
+      addLog?.({
+        timestamp: new Date().toISOString(),
+        type: 'response',
+        response: data
+      });
+
+      if (!resp.ok) {
+        throw new Error(data.error?.message || 'Zenmux API Error');
+      }
+
+      let content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error("No content in Zenmux response");
+
+      // Clean Markdown code blocks
+      if (content.includes('```json')) {
+        content = content.split('```json')[1].split('```')[0].trim();
+      } else if (content.includes('```')) {
+        content = content.split('```')[1].split('```')[0].trim();
+      }
+
+      const parsed = JSON.parse(content) as PresentationPlan;
+      parsed.style = styleInput;
+      parsed.requirements = requirementsInput;
+      if (!parsed.slides) throw new Error("Invalid JSON structure from Zenmux");
+      parsed.slides.forEach(s => s.selectedImageIds = []);
+      return parsed;
+
+    } catch (error) {
+      console.error("Zenmux Generation Error:", error);
+      addLog?.({ timestamp: new Date().toISOString(), type: 'error', message: String(error) });
+      return createFallbackPlan(slideCount, outputLanguage, styleInput);
+    }
+  }
+
+  // --- GOOGLE PROVIDER (DEFAULT) ---
+  const ai = new GoogleGenAI({ apiKey: getApiKey(apiKey) });
+  
   try {
+    addLog?.({
+        timestamp: new Date().toISOString(),
+        type: 'request',
+        message: 'Calling Google Gemini 2.5 Flash via SDK'
+    });
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
@@ -99,12 +207,16 @@ export const generateSlidePlan = async (
       }
     });
 
+    addLog?.({
+        timestamp: new Date().toISOString(),
+        type: 'response',
+        message: 'Google SDK Response received'
+    });
+
     if (response.text) {
         const parsed = JSON.parse(response.text) as PresentationPlan;
-        // Inject user style/requirements into the plan object so they persist
         parsed.style = styleInput;
         parsed.requirements = requirementsInput;
-        // Ensure selectedImageIds is initialized
         parsed.slides.forEach(s => s.selectedImageIds = []);
         return parsed;
     }
@@ -112,7 +224,12 @@ export const generateSlidePlan = async (
 
   } catch (error) {
     console.error("Gemini Generation Error:", error);
-    // Fallback if JSON parsing fails or API errors
+    addLog?.({ timestamp: new Date().toISOString(), type: 'error', message: String(error) });
+    return createFallbackPlan(slideCount, outputLanguage, styleInput);
+  }
+};
+
+const createFallbackPlan = (slideCount: number, outputLanguage: Language, styleInput?: string): PresentationPlan => {
     return {
       topic: outputLanguage === 'zh' ? "生成的演示文稿" : "Generated Presentation",
       style: styleInput,
@@ -127,8 +244,7 @@ export const generateSlidePlan = async (
         selectedImageIds: []
       }))
     };
-  }
-};
+}
 
 /**
  * Generates the final slide image using gemini-3-pro-image-preview (Nano Banana Pro) or fallback.
@@ -137,14 +253,14 @@ export const generateSlidePlan = async (
 export const generateFinalSlideImage = async (
   slide: SlideData, 
   style: string,
-  userImageBase64s?: string[]
+  userImageBase64s?: string[],
+  provider: Provider = 'google',
+  apiKey: string = '',
+  addLog?: (entry: LogEntry) => void
 ): Promise<string> => {
-  // Always instantiate a new client to ensure the latest API key from aistudio is used
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
-
+  
   const imageCount = userImageBase64s?.length || 0;
   
-  // Explicit instruction to strictly follow text content and style, with multi-image handling
   const textPrompt = `
     Design a professional, high-end presentation slide (16:9 Aspect Ratio).
     
@@ -162,8 +278,8 @@ export const generateFinalSlideImage = async (
     3. **Text Rendering**: Render the TITLE clearly. Render the Key Points legibly if they fit; if there is too much text, summarize it visually or use distinct headers. 
     4. **Image Integration**: 
        ${imageCount > 0 ? `I have provided ${imageCount} specific images for this slide.` : "No user images provided. Generate a custom illustration/graphic based on the Visual Description."}
-       ${imageCount === 1 ? "Integrate the single provided image seamlessly (e.g., as a hero image, full background with overlay, or split layout)." : ""}
-       ${imageCount > 1 ? "Arrange the provided images artistically (e.g., a neat grid, a collage, or distributed across the layout). Ensure they balance well with the text." : ""}
+       ${imageCount === 1 ? "Integrate the single provided image seamlessly (e.g., as a hero image, full background with overlay, or split layout). The provided images must be clearly displayed in the page layout." : ""}
+       ${imageCount > 1 ? "Arrange the provided images artistically (e.g., a neat grid, a collage, or distributed across the layout). Ensure they balance well with the text. The provided images must be clearly displayed in the page layout." : ""}
        IMPORTANT: If provided, the user images MUST be visible in the final design.
     
     Output: A single high-quality presentation slide image.
@@ -171,19 +287,101 @@ export const generateFinalSlideImage = async (
 
   const parts: any[] = [];
   
-  // Add all user images to the prompt
   if (userImageBase64s && userImageBase64s.length > 0) {
     userImageBase64s.forEach(base64 => {
         parts.push({
           inlineData: {
-            mimeType: 'image/jpeg', // Assuming jpeg/png, API handles standard types
-            data: base64.split(',')[1] // Remove data URL header
+            mimeType: 'image/jpeg', 
+            data: base64.split(',')[1] 
           }
         });
     });
   }
 
   parts.push({ text: textPrompt });
+
+  // --- ZENMUX PROVIDER ---
+  if (provider === 'zenmux') {
+      const payload = {
+        apiKey, 
+        model: 'google/gemini-3-pro-image-preview',
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+            imageConfig: {
+                aspectRatio: "16:9",
+                imageSize: "2K"
+            }
+        }
+    };
+    
+    addLog?.({
+      timestamp: new Date().toISOString(),
+      type: 'request',
+      url: '/api/zenmux/vertex-ai/v1/models/google/gemini-3-pro-image-preview:generateContent',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { ...payload, apiKey: '***' }
+    });
+
+    try {
+        const resp = await fetch('/api/zenmux/vertex-ai/v1/models/google/gemini-3-pro-image-preview:generateContent', {
+             method: 'POST',
+             headers: {
+               'Content-Type': 'application/json',
+               'Authorization': `Bearer ${apiKey}`
+             },
+             body: JSON.stringify({
+                contents: [{ role: 'user', parts }],
+                generationConfig: {
+                    imageConfig: {
+                        aspectRatio: "16:9",
+                        imageSize: "2K"
+                    }
+                }
+             })
+        });
+        
+        const data = await resp.json();
+        addLog?.({
+              timestamp: new Date().toISOString(),
+              type: 'response',
+              response: data
+          });
+
+        if (!resp.ok) throw new Error(data.error?.message || 'Zenmux Image API Error');
+        
+        // Handle Zenmux response format (supporting both potential formats)
+        let b64 = '';
+        if (data.imageBase64) {
+            b64 = data.imageBase64;
+        } else if (data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
+            b64 = data.candidates[0].content.parts[0].inlineData.data;
+        } else if (data.candidates?.[0]?.content?.parts) {
+            // Check for raw image bytes in parts if not in inlineData structure
+            // Sometimes providers might return it differently or nested
+            const parts = data.candidates[0].content.parts;
+            for (const p of parts) {
+                if (p.inlineData && p.inlineData.data) {
+                    b64 = p.inlineData.data;
+                    break;
+                }
+            }
+        }
+        
+        if (!b64) {
+             console.error("Zenmux Response missing image data:", JSON.stringify(data));
+             throw new Error("No image data found in Zenmux response");
+        }
+        
+        return `data:image/png;base64,${b64}`;
+    } catch (e) {
+        addLog?.({ timestamp: new Date().toISOString(), type: 'error', message: String(e) });
+        throw e;
+    }
+  }
+
+  // --- GOOGLE PROVIDER (DEFAULT) ---
+  const ai = new GoogleGenAI({ apiKey: getApiKey(apiKey) });
 
   // Helper to try generation
   const tryGenerate = async (modelName: string) => {
@@ -200,9 +398,13 @@ export const generateFinalSlideImage = async (
   };
 
   try {
+    addLog?.({ timestamp: new Date().toISOString(), type: 'request', message: 'Calling Google Gemini 3 Pro' });
+    
     // 1. Try High Quality Model
     console.log("Attempting generation with gemini-3-pro-image-preview...");
     const response = await tryGenerate('gemini-3-pro-image-preview');
+
+    addLog?.({ timestamp: new Date().toISOString(), type: 'response', message: 'Google Gemini 3 Pro Success' });
 
     // Extract image from response
     for (const part of response.candidates?.[0]?.content?.parts || []) {
@@ -214,6 +416,7 @@ export const generateFinalSlideImage = async (
 
   } catch (error: any) {
     console.warn("Primary model failed, checking for fallback...", error);
+    addLog?.({ timestamp: new Date().toISOString(), type: 'error', message: `Primary model failed: ${error}` });
     
     const errorMsg = error?.message || error?.toString() || "";
     
@@ -237,6 +440,7 @@ export const generateFinalSlideImage = async (
             }
         } catch (fallbackError) {
              console.error("Fallback generation failed:", fallbackError);
+             addLog?.({ timestamp: new Date().toISOString(), type: 'error', message: `Fallback failed: ${fallbackError}` });
              throw fallbackError; // Throw original or fallback error
         }
     }

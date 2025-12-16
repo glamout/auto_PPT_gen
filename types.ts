@@ -10,6 +10,19 @@ export enum AppStep {
 
 export type Language = 'en' | 'zh';
 
+export type Provider = 'google' | 'zenmux';
+
+export interface LogEntry {
+  timestamp: string;
+  type: 'request' | 'response' | 'error' | 'info';
+  url?: string;
+  method?: string;
+  headers?: any;
+  body?: any;
+  response?: any;
+  message?: string;
+}
+
 export interface UploadedFile {
   id: string;
   name: string;

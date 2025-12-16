@@ -8,6 +8,13 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          '/api/zenmux': {
+            target: 'https://zenmux.ai',
+            changeOrigin: true,
+            rewrite: (path) => path.replace(/^\/api\/zenmux/, '/api')
+          }
+        }
       },
       plugins: [react()],
       define: {

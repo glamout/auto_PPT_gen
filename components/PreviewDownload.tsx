@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { SlideData, UploadedFile, Language, PresentationPlan } from '../types';
+import { SlideData, UploadedFile, Language, PresentationPlan, Provider, LogEntry } from '../types';
 import { generateFinalSlideImage } from '../services/geminiService';
 import JSZip from 'jszip';
 import { Download, RefreshCw, ZoomIn, X, AlertCircle } from 'lucide-react';
@@ -11,10 +11,13 @@ interface PreviewDownloadProps {
   plan: PresentationPlan;
   images: UploadedFile[];
   uiLanguage: Language;
+  provider: Provider;
+  apiKey: string;
+  addLog: (entry: LogEntry) => void;
   onRestart: () => void;
 }
 
-export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, uiLanguage, onRestart }) => {
+export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, uiLanguage, provider, apiKey, addLog, onRestart }) => {
   const [generatedImages, setGeneratedImages] = useState<(string | null)[]>(new Array(plan.slides.length).fill(null));
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressIndex, setProgressIndex] = useState(0);
@@ -25,25 +28,32 @@ export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, 
   // Check for API key on mount
   useEffect(() => {
     const checkKey = async () => {
-      // In AI Studio environment, we strictly check for the key selection capability
-      if (window.aistudio && window.aistudio.hasSelectedApiKey) {
+      if (apiKey) {
+        setHasApiKey(true);
+        return;
+      }
+
+      // Fallback for Google AI Studio environment if no manual key provided
+      if (provider === 'google' && window.aistudio && window.aistudio.hasSelectedApiKey) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
         setHasApiKey(hasKey);
-      } else {
-        // Fallback: If not in AI Studio wrapper, we assume true to allow local dev (which usually has .env)
-        // or false if we want to be strict. For this specific error case, we'll default true but the error handler will catch it.
-        setHasApiKey(true); 
+      } else if (provider === 'google') {
+         // Local dev with env var potentially
+         setHasApiKey(true);
       }
     };
     checkKey();
-  }, []);
+  }, [apiKey, provider]);
 
   const handleSelectKey = async () => {
     try {
-      if (window.aistudio && window.aistudio.openSelectKey) {
+      if (provider === 'google' && window.aistudio && window.aistudio.openSelectKey) {
         await window.aistudio.openSelectKey();
-        // Race condition mitigation: assume success immediately after dialog closes
         setHasApiKey(true);
+      } else {
+        // If Zenmux or no AI Studio, user should have entered key in previous step
+        alert("Please enter API Key in the upload step.");
+        onRestart();
       }
     } catch (e) {
       console.error("Failed to select key", e);
@@ -80,11 +90,23 @@ export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, 
 
       try {
         // Pass the style from the plan and the array of images to the generator
-        const imageUrl = await generateFinalSlideImage(slide, plan.style || '', slideImagesBase64);
+        const imageUrl = await generateFinalSlideImage(
+            slide, 
+            plan.style || '', 
+            slideImagesBase64,
+            provider,
+            apiKey,
+            addLog
+        );
         results[i] = imageUrl;
         setGeneratedImages([...results]); 
       } catch (error: any) {
         console.error(`Error generating slide ${i + 1}`, error);
+        addLog({
+            timestamp: new Date().toISOString(),
+            type: 'error',
+            message: `Error generating slide ${i + 1}: ${error.message}`
+        });
         
         const errorMsg = error?.message || error?.toString() || "";
         
@@ -99,8 +121,8 @@ export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, 
            setIsGenerating(false);
            setHasApiKey(false); // Reset state to force re-selection
            alert(uiLanguage === 'zh' 
-             ? "API 权限不足。如果您想使用 Gemini 3.0 Pro 生成高清幻灯片，请选择一个关联了计费项目（付费）的 API 密钥。如果暂时无法提供，请重试，系统将自动尝试降级使用 Nano Banana (Gemini 2.5 Flash) 模型。" 
-             : "Permission denied for high-quality model. To use Gemini 3.0 Pro, please use a paid API Key. If you retry, the system will attempt to fallback to the Nano Banana model.");
+             ? "API 权限不足或配额已满。" 
+             : "Permission denied or quota exceeded.");
            return;
         }
         
@@ -160,24 +182,19 @@ export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, 
             <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-8 max-w-lg text-center shadow-sm">
               <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
               <h3 className="text-lg font-bold text-slate-800 mb-2">
-                {uiLanguage === 'zh' ? '需要付费 API 密钥' : 'Paid API Key Required'}
+                {uiLanguage === 'zh' ? '需要 API 密钥' : 'API Key Required'}
               </h3>
               <p className="text-slate-600 mb-6">
                 {uiLanguage === 'zh' 
-                  ? '要使用 Gemini 3.0 Pro 生成高清幻灯片，建议使用关联了 Google Cloud 计费项目的 API 密钥。如果只有免费密钥，系统会自动降级尝试使用标准模型。' 
-                  : 'To generate high-quality images using the Nano Banana Pro (Gemini 3.0 Pro) model, a paid API Key is recommended. The system will fallback to standard models if needed.'}
+                  ? '请提供有效的 API 密钥以继续生成。' 
+                  : 'Please provide a valid API Key to continue generation.'}
               </p>
               <button 
                 onClick={handleSelectKey}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg"
               >
-                {uiLanguage === 'zh' ? '连接并启用生成' : 'Connect & Enable Generation'}
+                {uiLanguage === 'zh' ? '配置密钥' : 'Configure Key'}
               </button>
-              <p className="text-xs text-slate-400 mt-4">
-                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline hover:text-indigo-500">
-                  {uiLanguage === 'zh' ? '查看计费文档' : 'View Billing Documentation'}
-                </a>
-              </p>
             </div>
           </div>
         ) : !isGenerating && generatedImages.every(img => img === null) ? (
@@ -186,8 +203,8 @@ export const PreviewDownload: React.FC<PreviewDownloadProps> = ({ plan, images, 
                <h3 className="text-2xl font-bold text-slate-800">{uiLanguage === 'zh' ? '准备生成幻灯片' : 'Ready to Generate Slides'}</h3>
                <p className="text-slate-500 max-w-md mx-auto">
                  {uiLanguage === 'zh' 
-                   ? '我们将根据您的图片、大纲以及设定的风格生成高清幻灯片。这将优先尝试 Gemini 3.0 Pro，若不可用则自动降级。' 
-                   : 'We will generate high-definition slides based on your outline, images, and style. We prioritize Gemini 3.0 Pro with automatic fallback.'}
+                   ? '我们将根据您的图片、大纲以及设定的风格生成高清幻灯片。' 
+                   : 'We will generate high-definition slides based on your outline, images, and style.'}
                </p>
                <button 
                 onClick={startGeneration}
