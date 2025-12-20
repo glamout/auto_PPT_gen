@@ -90,3 +90,5 @@ This project is built with Vite and can be easily deployed to any static hosting
 ## License
 
 [MIT](LICENSE)
+
+## designed by 不是懦夫斯基
