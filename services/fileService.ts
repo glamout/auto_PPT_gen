@@ -1,11 +1,11 @@
 import * as mammoth from 'mammoth';
 import { UploadedFile } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
 
-declare global {
-  interface Window {
-    pdfjsLib: any;
-  }
-}
+// Vite url import for worker
+import pdfWorker from 'pdfjs-dist/build/pdf.worker?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export const readFileAsBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -27,7 +27,7 @@ export const readFileAsText = (file: File): Promise<string> => {
 
 const extractPdfText = async (dataUrl: string): Promise<string> => {
   try {
-    const loadingTask = window.pdfjsLib.getDocument(dataUrl);
+    const loadingTask = pdfjsLib.getDocument(dataUrl);
     const pdf = await loadingTask.promise;
     let fullText = '';
     
